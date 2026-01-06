@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from datetime import timedelta
 from dotenv import load_dotenv
-import dj_database_url  # Added for Render database connection
+import dj_database_url
 
 # Load environment variables
 load_dotenv()
@@ -13,16 +13,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-default-key-change-this-in-production')
 
-# Set DEBUG to False by default for production safety, specifically True only if env says so
+# Set DEBUG based on environment variable (default to False for safety)
 DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 # Allow hosts from environment or default to localhost
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-# Add Render's internal host for health checks if needed, or use '*' for simplicity in initial deploy
+
+# Add Render's internal host for health checks if needed
 if not DEBUG:
     ALLOWED_HOSTS += ['.onrender.com']
 
-# Automatically append slashes to URLs (important to prevent 404s)
+# Automatically append slashes to URLs
 APPEND_SLASH = True
 
 # Application definition
@@ -32,13 +33,16 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'cloudinary_storage',  # Must come BEFORE staticfiles
     'django.contrib.staticfiles',
+    'cloudinary',
     'django_extensions',
 
     # Third-party apps
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
+    'simple_history',
 
     # Project apps
     'accounts',
@@ -48,16 +52,18 @@ INSTALLED_APPS = [
     'forecasting',
 ]
 
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware', # Added for static files on Render
+    'whitenoise.middleware.WhiteNoiseMiddleware',    # Serves static files
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware', # CORS Middleware is correctly placed
+    'corsheaders.middleware.CorsMiddleware',         # Handles CORS headers
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'simple_history.middleware.HistoryRequestMiddleware', # ADDED for User Tracking
 ]
 
 ROOT_URLCONF = 'flowerbelle_backend.urls'
@@ -80,13 +86,22 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'flowerbelle_backend.wsgi.application'
 
-# Database Configuration (Updated for Render)
-# This tries to get DATABASE_URL from Render. If not found, it uses your local default.
+# ==========================================
+# DATABASE CONFIGURATION (FIXED)
+# ==========================================
+
+# The External URL you provided
+EXTERNAL_DB_URL = "postgresql://bellestudio_db_user:zN2T7EYZe63JSQXQsOYUees16YBHgRRh@dpg-d5eeebuuk2gs73ec2vig-a.singapore-postgres.render.com/bellestudio_db"
+
 DATABASES = {
-    'default': dj_database_url.config(
-        default=os.getenv('DATABASE_URL', 'postgres://postgres:password@localhost:5432/flowerbelle_db'),
-        conn_max_age=600
-    )
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'bellestudio_db',
+        'USER': 'bellestudio_db_user',
+        'PASSWORD': 'zN2T7EYZe63JSQXQsOYUees16YBHgRRh',
+        'HOST': 'dpg-d5eeebuuk2gs73ec2vig-a.singapore-postgres.render.com',
+        'PORT': '5432',
+    }
 }
 
 # Password validation
@@ -113,28 +128,82 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# ==========================================
+# CLOUDINARY CONFIGURATION (For Render hosting)
+# ==========================================
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+
+# Read environment variables
+_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', '')
+_API_KEY = os.getenv('CLOUDINARY_API_KEY', '')
+_API_SECRET = os.getenv('CLOUDINARY_API_SECRET', '')
+
+# Always print what we found for debugging
+print("=" * 60)
+print("[CLOUDINARY CONFIG]")
+print(f"  CLOUD_NAME: '{_CLOUD_NAME}' (len={len(_CLOUD_NAME)})")
+print(f"  API_KEY: {'SET' if _API_KEY else 'EMPTY'} (len={len(_API_KEY)})")
+print(f"  API_SECRET: {'SET' if _API_SECRET else 'EMPTY'} (len={len(_API_SECRET)})")
+
+if _CLOUD_NAME and _API_KEY and _API_SECRET:
+    print("[CLOUDINARY] Configuring with provided credentials...")
+    
+    # Configure cloudinary SDK directly
+    cloudinary.config(
+        cloud_name=_CLOUD_NAME,
+        api_key=_API_KEY,
+        api_secret=_API_SECRET,
+        secure=True
+    )
+    
+    # Set Django to use Cloudinary for media storage
+    DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+    
+    CLOUDINARY_STORAGE = {
+        'CLOUD_NAME': _CLOUD_NAME,
+        'API_KEY': _API_KEY,
+        'API_SECRET': _API_SECRET,
+    }
+    
+    print("[CLOUDINARY] ✅ Configuration complete!")
+    print(f"[CLOUDINARY] DEFAULT_FILE_STORAGE = {DEFAULT_FILE_STORAGE}")
+else:
+    print("[CLOUDINARY] ❌ Missing credentials - using local storage")
+    print(f"  Missing: ", end="")
+    missing = []
+    if not _CLOUD_NAME: missing.append("CLOUD_NAME")
+    if not _API_KEY: missing.append("API_KEY")
+    if not _API_SECRET: missing.append("API_SECRET")
+    print(", ".join(missing))
+
+print("=" * 60)
+
+
+
+
 # Default primary key
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Custom User model
 AUTH_USER_MODEL = 'accounts.User'
 
-# CORS Settings (Updated for Render)
-# 1. Get origins from Render Environment Variable (you will add this in the dashboard)
+# ==========================================
+# CORS SETTINGS
+# ==========================================
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
 
-# 2. If we are running locally (DEBUG=True), add the local ports
+# FIX: Corrected Python list assignment under if DEBUG:
 if DEBUG:
-    CORS_ALLOWED_ORIGINS += [
+    CORS_ALLOWED_ORIGINS = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-        "http://localhost:3002", 
-        "http://127.0.0.1:3002",
+        "http://localhost:5173", 
+        "https://flowerbelle-frontend.onrender.com",
     ]
 
-# Clean up the list to remove empty strings
+# Remove empty strings from list
 CORS_ALLOWED_ORIGINS = [origin for origin in CORS_ALLOWED_ORIGINS if origin]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -143,10 +212,11 @@ CORS_ALLOW_HEADERS = [
     'accept', 'accept-encoding', 'authorization', 'content-type', 'dnt',
     'origin', 'user-agent', 'x-csrftoken', 'x-requested-with',
 ]
-
 CORS_EXPOSE_HEADERS = ['Content-Disposition', 'Content-Type']
 
-# REST Framework
+# ==========================================
+# REST FRAMEWORK & JWT
+# ==========================================
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication', 
@@ -157,7 +227,6 @@ REST_FRAMEWORK = {
     )
 }
 
-# JWT settings
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
